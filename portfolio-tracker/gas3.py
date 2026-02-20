@@ -2,45 +2,51 @@ import os
 import requests
 import json
 from datetime import datetime
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # ==========================================
 # 1. 核心設定
 # ==========================================
 # 從環境變數讀取敏感資訊 (用於 GitHub Actions)
 # 若本地執行且未設定環境變數，則使用預設值
-LINE_NOTIFY_TOKEN = os.environ.get("LINE_NOTIFY_TOKEN", "24f4aeddb3cd2f2b6531f3df858049b9") 
+STOCK_BOT_EMAIL = os.environ.get("STOCK_BOT_EMAIL", "xie12343@gmail.com")
+STOCK_BOT_PWD = os.environ.get("STOCK_BOT_PWD", "") # 需提供 16 位 Gmail 應用程式密碼
 GAS_URL = os.environ.get("GAS_URL", "https://script.google.com/macros/s/AKfycbxLks0Ad8OidLHTfaRtztMCm9yH8_kQjNjIRYwD1XWwgjjnNq_kMKP0fWokErMhNZ0wqA/exec")
 
 USD_TWD_RATE = 32.5  # 基準匯率
 ALERT_THRESHOLD_USD = 1500000 # 150萬美金觸發保護
-import socket
-
-# 強制將 notify-api.line.me 解析為 IPv4 地址
-def force_ipv4():
-    old_getaddrinfo = socket.getaddrinfo
-    def new_getaddrinfo(*args, **kwargs):
-        res = old_getaddrinfo(*args, **kwargs)
-        return [r for r in res if r[0] == socket.AF_INET]
-    socket.getaddrinfo = new_getaddrinfo
-
-force_ipv4()
 
 # ==========================================
-# 2. 功能：發送 Line 通知
+# 2. 功能：發送 Email 通知
 # ==========================================
-def send_line_alert(msg):
-    url = "https://notify-api.line.me/api/notify"
-    headers = {"Authorization": f"Bearer {LINE_NOTIFY_TOKEN}"}
-    payload = {"message": msg}
-    try:
-        # 增加 timeout 設定為 5 秒
-        res = requests.post(url, headers=headers, data=payload, timeout=5)
-        return res.status_code == 200
-    except requests.exceptions.ConnectionError:
-        print("❌ 網路連線錯誤，請檢查 DNS 或是否開啟了 VPN。")
+def send_email_alert(msg_content):
+    recipient = "xie12343@gmail.com"
+    sender = STOCK_BOT_EMAIL
+    password = STOCK_BOT_PWD
+
+    if not password:
+        print("⚠️ 未設定 STOCK_BOT_PWD，跳過郵件寄送。")
         return False
+
+    print(f"📧 正在寄送資產警報至: {recipient} ...")
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = f"Portfolio Monitor <{sender}>"
+        msg['To'] = recipient
+        msg['Subject'] = f"🚨 資產防護警報 - {datetime.now().strftime('%Y-%m-%d')}"
+
+        msg.attach(MIMEText(msg_content, 'plain'))
+
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(sender, password)
+        server.send_message(msg)
+        server.quit()
+        return True
     except Exception as e:
-        print(f"Line 發送異常: {e}")
+        print(f"❌ 郵件寄送失敗: {e}")
         return False
 
 # ==========================================
@@ -88,8 +94,8 @@ def run_monitor():
                 f"💡 請登入富邦 Neo SDK 確認下單。"
             )
             
-            if send_line_alert(alert_msg):
-                print("✅ Line 警報已發送至手機！")
+            if send_email_alert(alert_msg):
+                print("✅ Email 警報已發送！")
         else:
             print(f"✅ 資產尚未達標 (${total_usd:,.0f} < {ALERT_THRESHOLD_USD:,.0f})，保持監控。")
 

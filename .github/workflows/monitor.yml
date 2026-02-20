@@ -24,6 +24,7 @@ jobs:
 
       - name: Run Monitor
         env:
-          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
+          STOCK_BOT_EMAIL: ${{ secrets.STOCK_BOT_EMAIL }}
+          STOCK_BOT_PWD: ${{ secrets.STOCK_BOT_PWD }}
           GAS_URL: ${{ secrets.GAS_URL }}
         run: python portfolio-tracker/gas3.py
