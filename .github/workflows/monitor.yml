@@ -2,7 +2,8 @@ name: Portfolio Monitor Alerting
 
 on:
   schedule:
-    - cron: '0 */4 * * *' # 每 4 小時執行一次
+    # 每天台灣時間 09:00 (UTC 01:00) 執行一次
+    - cron: '0 1 * * *'
   workflow_dispatch: # 允許手動觸發
 
 jobs:
