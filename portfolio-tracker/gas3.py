@@ -10,9 +10,9 @@ from email.mime.multipart import MIMEMultipart
 # ==========================================
 # 1. 核心設定
 # ==========================================
-STOCK_BOT_EMAIL = os.environ.get("STOCK_BOT_EMAIL", "xie12343@gmail.com")
-STOCK_BOT_PWD = os.environ.get("STOCK_BOT_PWD", "kasf euov ntjc fpiq") 
-GAS_URL = os.environ.get("GAS_URL", "https://script.google.com/macros/s/AKfycbxLks0Ad8OidLHTfaRtztMCm9yH8_kQjNjIRYwD1XWwgjjnNq_kMKP0fWokErMhNZ0wqA/exec")
+STOCK_BOT_EMAIL = os.environ.get("STOCK_BOT_EMAIL") or "xie12343@gmail.com"
+STOCK_BOT_PWD = os.environ.get("STOCK_BOT_PWD") or "kasf euov ntjc fpiq" 
+GAS_URL = os.environ.get("GAS_URL") or "https://script.google.com/macros/s/AKfycbxLks0Ad8OidLHTfaRtztMCm9yH8_kQjNjIRYwD1XWwgjjnNq_kMKP0fWokErMhNZ0wqA/exec"
 
 USD_TWD_RATE = 32.5 
 ALERT_THRESHOLD_USD = 1500000 
