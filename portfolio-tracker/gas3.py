@@ -7,12 +7,16 @@ import yfinance as yf
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# ==========================================
-# 1. 核心設定
-# ==========================================
-STOCK_BOT_EMAIL = os.environ.get("STOCK_BOT_EMAIL") or "xie12343@gmail.com"
-STOCK_BOT_PWD = os.environ.get("STOCK_BOT_PWD") or "kasf euov ntjc fpiq" 
-GAS_URL = os.environ.get("GAS_URL") or "https://script.google.com/macros/s/AKfycbxLks0Ad8OidLHTfaRtztMCm9yH8_kQjNjIRYwD1XWwgjjnNq_kMKP0fWokErMhNZ0wqA/exec"
+# 1. 核心設定 (使用環境變數，適合 GitHub Actions)
+STOCK_BOT_EMAIL = os.environ.get("STOCK_BOT_EMAIL")
+STOCK_BOT_PWD = os.environ.get("STOCK_BOT_PWD")
+GAS_URL = os.environ.get("GAS_URL")
+
+# --- 偵錯用：檢查變數是否存在 ---
+if not GAS_URL:
+    print("❌ 錯誤：找不到 GAS_URL 環境變數，請檢查 GitHub Secrets 設定。")
+else:
+    print(f"✅ 已讀取 GAS_URL: {GAS_URL[:15]}...") # 只印出前 15 個字確保安全
 
 USD_TWD_RATE = 32.5 
 ALERT_THRESHOLD_USD = 1500000 
@@ -44,10 +48,13 @@ def get_market_intelligence():
 # 3. 功能：發送 Email 通知
 # ==========================================
 def send_email_alert(msg_content, strategy_name=""):
-    recipient = "xie12343@gmail.com"
+    recipient = STOCK_BOT_EMAIL
     sender = STOCK_BOT_EMAIL
     password = STOCK_BOT_PWD
-    if not password: return False
+    
+    if not password:
+        print("❌ 錯誤：STOCK_BOT_PWD 未設定")
+        return False
 
     try:
         msg = MIMEMultipart()
@@ -70,9 +77,32 @@ def send_email_alert(msg_content, strategy_name=""):
 # ==========================================
 def run_monitor():
     try:
+        if not GAS_URL:
+            print("❌ 錯誤：GAS_URL 未設定，無法執行。")
+            return
+
+        print(f"📡 正在請求 GAS URL...")
+        response = requests.get(GAS_URL, timeout=15)
+        
+        # 檢查 HTTP 狀態碼
+        if response.status_code != 200:
+            print(f"❌ API 請求失敗，狀態碼：{response.status_code}")
+            return
+
+        # 檢查是否抓到空的內容
+        if not response.text.strip():
+            print("❌ 錯誤：GAS 回傳內容為空，請檢查 GAS 程式碼是否已 return JSON 並重新部署為『新版本』")
+            return
+
+        # 嘗試解析 JSON
+        try:
+            data = response.json()
+        except Exception:
+            print(f"❌ 無法解析 JSON。收到的內容為: {response.text}")
+            return
+
         # 1. 資產檢查
-        response = requests.get(GAS_URL, timeout=10)
-        portfolio_raw = float(response.json().get('portfolio_value', 0))
+        portfolio_raw = float(data.get('portfolio_value', 0))
         total_usd = portfolio_raw / USD_TWD_RATE if portfolio_raw > 10000000 else portfolio_raw
         
         # 2. 市場智能分析
@@ -104,7 +134,7 @@ def run_monitor():
                 reason = "市場處於中性震盪。建議使用零成本組合，鎖定上下 3% 區間。"
                 rec_action = f"👉 賣出 Call @{col_c} + 買入 Put @{col_p}"
 
-            # --- 郵件內容 ---
+            # --- 郵件內容 (修正格式化問題) ---
             now = datetime.now().strftime('%Y-%m-%d %H:%M')
             msg = (
                 f"【資產防護決策報告】\n"
