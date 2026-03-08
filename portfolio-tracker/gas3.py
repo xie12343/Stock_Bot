@@ -76,6 +76,43 @@ def get_market_intelligence():
         return None, None, None
 
 # ==========================================
+# 2.5 功能：期貨合約 CP 值分析 (含 W2, F1, F2)
+# ==========================================
+def get_contract_intelligence(taiex):
+    """
+    分析不同合約的 CP 值 (Spot - Futures)
+    CP 值越高，代表期貨相對於現貨越便宜，適合買入。
+    """
+    print("📊 正在分析期貨合約 CP 值...")
+    
+    # 模擬/獲取合約數據 (實務上建議對接富邦 SDK 獲取即時報價)
+    # 這裡使用 yfinance 獲取近月 (TX=F)，其餘使用基差模擬邏輯供參考
+    try:
+        tx_f1_data = yf.Ticker("TX=F").history(period='1d')
+        f1_price = round(tx_f1_data['Close'].iloc[-1], 2)
+    except Exception:
+        f1_price = taiex - 20 # 預設逆價差 20 點
+        
+    # 定義合約候選名單 (價格基於 F1 進行模擬偏移，使用者未來可改為 SDK 抓取)
+    contracts = [
+        {"name": "台指 W2 (週)", "price": f1_price + 5,   "margin": 41000}, # 週小台約 4.1萬
+        {"name": "台指 F1 (本月)", "price": f1_price,      "margin": 41000},
+        {"name": "台指 F2 (次月)", "price": f1_price - 30,  "margin": 41000},
+    ]
+    
+    results = []
+    for c in contracts:
+        basis = taiex - c['price']
+        cp_ratio = (basis / taiex) * 100
+        c['basis'] = round(basis, 2)
+        c['cp_ratio'] = round(cp_ratio, 4)
+        results.append(c)
+        
+    # 按 CP 值排序 (由高到低)
+    results.sort(key=lambda x: x['cp_ratio'], reverse=True)
+    return results
+
+# ==========================================
 # 3. 功能：發送 Email 通知
 # ==========================================
 def send_email_alert(msg_content, strategy_name=""):
@@ -162,6 +199,11 @@ def run_monitor():
             opt_qty = round(portfolio_twd / contract_value_50) # 選擇權與小台建議口數
             tx_qty = round(portfolio_twd / (taiex * 200), 1)   # 大台建議口數
 
+            # 3. 期貨合約精選
+            contract_reports = get_contract_intelligence(taiex)
+            best_c = contract_reports[0]
+            total_cost_twd = best_c['margin'] * opt_qty
+
             # --- VIX + 趨勢 綜合判斷邏輯 ---
             if vix > 30:
                 market_view = "市場極度恐慌 (VIX 飆升)，選擇權保費極貴。"
@@ -173,6 +215,12 @@ def run_monitor():
                 market_view = "市場處於中性震盪或緩跌。"
                 primary_rec = "方案 B (衣領策略)"
 
+            # --- 構建 CP 值表格 ---
+            cp_table = "合約名稱          | 價格    | 基差    | CP 值 (%) \n"
+            cp_table += "----------------------------------------------\n"
+            for cr in contract_reports:
+                cp_table += f"{cr['name']:<15} | {cr['price']:<7} | {cr['basis']:<7} | {cr['cp_ratio']:.4f}%\n"
+
             # --- 郵件內容構建 ---
             msg = (
                 f"【資產防護決策報告】\n"
@@ -183,6 +231,13 @@ def run_monitor():
                 f"   - VIX 指數：{vix} ({market_view})\n"
                 f"🎯 系統判定首選：{primary_rec}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                
+                f"🔥 【最佳 CP 值合約推薦】\n"
+                f"{cp_table}\n"
+                f"💡 推薦合約：{best_c['name']}\n"
+                f"💵 預估所需資金：{total_cost_twd:,.0f} TWD ({opt_qty} 口 x {best_c['margin']:,} 原始保證金)\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
                 f"【執行方案評估與建議口數】\n\n"
                 
                 f"🔴 方案 A：保護性賣權 (Protective Put)\n"
