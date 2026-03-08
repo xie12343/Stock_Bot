@@ -109,55 +109,67 @@ def run_monitor():
         taiex, trend, vix = get_market_intelligence()
         
         if total_usd >= ALERT_THRESHOLD_USD and taiex:
-            # --- 數據準備 ---
-            p_put = int((taiex * 0.95) // 100 * 100)
-            c_call = int((taiex * 1.05) // 100 * 100)
-            col_p = int((taiex * 0.97) // 100 * 100)
-            col_c = int((taiex * 1.03) // 100 * 100)
-            hedge_qty = round((total_usd * USD_TWD_RATE) / (taiex * 200), 2)
+            # --- 數據準備與精算 ---
+            portfolio_twd = total_usd * USD_TWD_RATE
+            
+            # 履約價計算 (取整數至百位)
+            p_put = int((taiex * 0.95) // 100 * 100)      # 價外 5% Put (保險)
+            col_p = int((taiex * 0.97) // 100 * 100)      # Collar 支撐 (價外 3%)
+            col_c = int((taiex * 1.03) // 100 * 100)      # Collar 壓力 (價外 3%)
+            
+            # 口數計算 (精確計算名目本金對沖)
+            # 選擇權與小台乘數為 50 元/點；大台為 200 元/點
+            contract_value_50 = taiex * 50
+            opt_qty = round(portfolio_twd / contract_value_50) # 選擇權與小台建議口數
+            tx_qty = round(portfolio_twd / (taiex * 200), 1)   # 大台建議口數
 
             # --- VIX + 趨勢 綜合判斷邏輯 ---
             if vix > 30:
-                best_strategy = "期貨空單對沖 (Short Hedge)"
-                reason = f"VIX 指數極高 ({vix})，市場進入極度恐慌。期權保費過貴，建議直接用期貨鎖死風險。"
-                rec_action = f"👉 賣出台指期空單 {hedge_qty} 口"
+                market_view = "市場極度恐慌 (VIX 飆升)，選擇權保費極貴。"
+                primary_rec = "方案 C (期貨對沖)"
             elif vix > 22 or trend < -0.02:
-                best_strategy = "保護性賣權 (Protective Put)"
-                reason = f"市場波動加劇 (VIX: {vix}) 且趨勢向下。建議買入保險，防止資產崩跌。"
-                rec_action = f"👉 買入 Put @{p_put}"
-            elif trend > 0.02 and vix < 18:
-                best_strategy = "覆蓋式買權 (Covered Call)"
-                reason = "市場情緒穩定且溫和上漲。建議賣出價外 Call 賺取額外現金流。"
-                rec_action = f"👉 賣出 Call @{c_call}"
+                market_view = "市場波動加劇且趨勢向下，下行風險高。"
+                primary_rec = "方案 A (保護性賣權)"
             else:
-                best_strategy = "零成本衣領策略 (Zero-Cost Collar)"
-                reason = "市場處於中性震盪。建議使用零成本組合，鎖定上下 3% 區間。"
-                rec_action = f"👉 賣出 Call @{col_c} + 買入 Put @{col_p}"
+                market_view = "市場處於中性震盪或緩跌。"
+                primary_rec = "方案 B (衣領策略)"
 
-            # --- 郵件內容 (修正格式化問題) ---
-            now = datetime.now().strftime('%Y-%m-%d %H:%M')
+            # --- 郵件內容構建 ---
             msg = (
                 f"【資產防護決策報告】\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💰 資產總額：${total_usd:,.2f} USD\n"
+                f"💰 資產總額：${total_usd:,.2f} USD (約 {portfolio_twd:,.0f} TWD)\n"
                 f"📊 市場狀態：\n"
                 f"   - 台指點位：{taiex:,.2f} ({'↑' if trend>0 else '↓'} {trend:.2%})\n"
-                f"   - VIX 恐懼指數：{vix} ({'偏高' if vix>20 else '穩定'})\n"
+                f"   - VIX 指數：{vix} ({market_view})\n"
+                f"🎯 系統判定首選：{primary_rec}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"【執行方案評估與建議口數】\n\n"
+                
+                f"🔴 方案 A：保護性賣權 (Protective Put)\n"
+                f"   - 操作：買入 {p_put} Put\n"
+                f"   - 口數：{opt_qty} 口\n"
+                f"   - 優點：最大虧損僅限於權利金，無保證金追繳風險；資產上漲獲利空間不受限。\n"
+                f"   - 缺點：保費為沉沒成本，若指數未跌破 {p_put}，權利金將隨時間歸零 (Theta 耗損)。\n\n"
+
+                f"🟡 方案 B：零成本衣領 (Zero-Cost Collar)\n"
+                f"   - 操作：買入 {col_p} Put + 賣出 {col_c} Call\n"
+                f"   - 口數：各 {opt_qty} 組\n"
+                f"   - 優點：利用賣 Call 的收入補貼買 Put 的支出，達成接近「零成本」的防護。\n"
+                f"   - 缺點：資產若大漲超過 {col_c}，超額利潤將被鎖死；賣 Call 需占用一定保證金。\n\n"
+
+                f"🔵 方案 C：期貨完全對沖 (Short Hedge)\n"
+                f"   - 操作：賣出 小台指 (MTX)\n"
+                f"   - 口數：{opt_qty} 口 (或大台 {tx_qty} 口)\n"
+                f"   - 優點：Delta 絕對值為 1，防護效果最直接，沒有時間價值流失的問題。\n"
+                f"   - 缺點：若市場反轉向上，期貨空單將產生實質虧損，且需準備充足的維持保證金以防斷頭。\n\n"
+                
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💡 最佳對策：{best_strategy}\n"
-                f"📝 判斷理由：{reason}\n"
-                f"🚀 執行建議：{rec_action}\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"⚖️ 其他參數參考：\n"
-                f"   - 期貨對沖口數：{hedge_qty} 口\n"
-                f"   - Collar 區間：{col_p} ~ {col_c}\n"
-                f"   - 深度 Put 支撐：{p_put}\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"請登入富邦 Neo SDK 執行操作。"
+                f"請登入富邦 Neo SDK 或 e點通確認即時報價後執行。"
             )
             
-            if send_email_alert(msg, strategy_name=best_strategy):
-                print(f"✅ 決策郵件已發送。當前 VIX: {vix}")
+            if send_email_alert(msg, strategy_name=primary_rec):
+                print(f"✅ 決策郵件已發送。當前 VIX: {vix}，建議防護口數: {opt_qty}")
         else:
             print(f"✅ 監控中... 資產 ${total_usd:,.0f} / VIX: {vix}")
 
