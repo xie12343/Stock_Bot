@@ -184,27 +184,29 @@ def run_monitor():
                 print(f"❌ 無à解析 JSON。收到的內容為: {response.text}")
                 return
 
-        # 1. 資產檢查
+        # 1. 資產檢查 (監控全球總額)
         portfolio_raw = float(data.get('portfolio_value', 0))
         total_usd = portfolio_raw / USD_TWD_RATE if portfolio_raw > 10000000 else portfolio_raw
+        portfolio_twd = total_usd * USD_TWD_RATE
+
+        # 1.1 設定避險標的額度 (僅針對台股部位，使用者提供約 1~200 萬)
+        HEDGE_EXPOSURE_TWD = 2000000 
         
         # 2. 市場智能分析
         taiex, trend, vix = get_market_intelligence()
         
         if total_usd >= ALERT_THRESHOLD_USD and taiex:
             # --- 數據準備與精算 ---
-            portfolio_twd = total_usd * USD_TWD_RATE
-            
             # 履約價計算 (取整數至百位)
             p_put = int((taiex * 0.95) // 100 * 100)      # 價外 5% Put (保險)
             col_p = int((taiex * 0.97) // 100 * 100)      # Collar 支撐 (價外 3%)
             col_c = int((taiex * 1.03) // 100 * 100)      # Collar 壓力 (價外 3%)
             
-            # 口數計算 (精確計算名目本金對沖)
+            # 口數計算 (僅針對台股 200 萬部位對沖)
             # 選擇權與小台乘數為 50 元/點；大台為 200 元/點
             contract_value_50 = taiex * 50
-            opt_qty = round(portfolio_twd / contract_value_50) # 選擇權與小台建議口數
-            tx_qty = round(portfolio_twd / (taiex * 200), 1)   # 大台建議口數
+            opt_qty = round(HEDGE_EXPOSURE_TWD / contract_value_50, 1) # 建議口數 (含小數點供參考)
+            tx_qty = round(HEDGE_EXPOSURE_TWD / (taiex * 200), 1)      # 大台建議口數
 
             # 3. 期貨合約基差精選 (用於參考市場價格)
             contract_reports = get_contract_intelligence(taiex)
@@ -225,8 +227,10 @@ def run_monitor():
                 # 買入 Put 成本計算 (無須保證金，僅權利金)
                 # 假設極端行情下，價外 Put 約 200 點
                 est_premium_pts = 200 
-                total_cost_twd = est_premium_pts * 50 * opt_qty
-                cost_desc = f"{opt_qty} 口 x {est_premium_pts} 點 x 50 元 (預估權利金)"
+                # 以整數口數計算成本
+                final_qty = round(opt_qty) if opt_qty >= 1 else 1
+                total_cost_twd = est_premium_pts * 50 * final_qty
+                cost_desc = f"{final_qty} 口 x {est_premium_pts} 點 x 50 元 (預估權利金)"
                 cost_label = "💸 預估所需權利金"
             else:
                 market_view = "市場處於中性震盪或緩跌。"
@@ -246,7 +250,8 @@ def run_monitor():
             msg = (
                 f"【資產防護決策報告】\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💰 資產總額：${total_usd:,.2f} USD (約 {portfolio_twd:,.0f} TWD)\n"
+                f"💰 全球資產總額：${total_usd:,.2f} USD (約 {portfolio_twd:,.0f} TWD)\n"
+                f"🛡️ 台股避險目標：{HEDGE_EXPOSURE_TWD:,.0f} TWD (排除美股/愛爾蘭英股)\n"
                 f"📊 市場狀態：\n"
                 f"   - 台指點位：{taiex:,.2f} ({'↑' if trend>0 else '↓'} {trend:.2%})\n"
                 f"   - VIX 指數：{vix} ({market_view})\n"
