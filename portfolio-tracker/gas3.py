@@ -8,6 +8,13 @@ import yfinance as yf
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# Force UTF-8 output for Windows console compatibility
+if sys.stdout.encoding.lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
+
 # ==========================================
 # 0. 輔助功能：載入本地 .env 檔案 (無需額外套件)
 # ==========================================
@@ -76,28 +83,28 @@ def get_market_intelligence():
         return None, None, None
 
 # ==========================================
-# 2.5 功能：期貨合約 CP 值分析 (含 W2, F1, F2)
+# 2.5 功能：小台期貨合約 CP 值分析 (含 W2, F1, F2)
 # ==========================================
 def get_contract_intelligence(taiex):
     """
-    分析不同合約的 CP 值 (Spot - Futures)
-    CP 值越高，代表期貨相對於現貨越便宜，適合買入。
+    分析不同月份小台期貨 (MTX) 的 CP 值 (現貨 - 期貨 = 基差)
+    基差 (Basis) 越高，代表期貨相對於現貨越便宜，對買方 (Long) 越有利。
     """
-    print("📊 正在分析期貨合約 CP 值...")
+    print("📊 正在分析期貨合約基差與 CP 值...")
     
-    # 模擬/獲取合約數據 (實務上建議對接富邦 SDK 獲取即時報價)
-    # 這裡使用 yfinance 獲取近月 (TX=F)，其餘使用基差模擬邏輯供參考
+    # 獲取近月 (TX=F) 價格
     try:
         tx_f1_data = yf.Ticker("TX=F").history(period='1d')
         f1_price = round(tx_f1_data['Close'].iloc[-1], 2)
     except Exception:
         f1_price = taiex - 20 # 預設逆價差 20 點
         
-    # 定義合約候選名單 (價格基於 F1 進行模擬偏移，使用者未來可改為 SDK 抓取)
+    # 定義期貨合約候選名單 (價格基於 F1 進行模擬偏移)
+    # 注意：這裡比較的是期貨報價(點數)，用於觀察市場偏向。
     contracts = [
-        {"name": "台指 W2 (週)", "price": f1_price + 5,   "margin": 41000}, # 週小台約 4.1萬
-        {"name": "台指 F1 (本月)", "price": f1_price,      "margin": 41000},
-        {"name": "台指 F2 (次月)", "price": f1_price - 30,  "margin": 41000},
+        {"name": "台指 W2 (週小台)", "price": f1_price + 5},
+        {"name": "台指 F1 (本月小台)", "price": f1_price},
+        {"name": "台指 F2 (次月小台)", "price": f1_price - 30},
     ]
     
     results = []
@@ -108,7 +115,7 @@ def get_contract_intelligence(taiex):
         c['cp_ratio'] = round(cp_ratio, 4)
         results.append(c)
         
-    # 按 CP 值排序 (由高到低)
+    # 按 CP 值排序 (基差越大越好)
     results.sort(key=lambda x: x['cp_ratio'], reverse=True)
     return results
 
@@ -199,27 +206,41 @@ def run_monitor():
             opt_qty = round(portfolio_twd / contract_value_50) # 選擇權與小台建議口數
             tx_qty = round(portfolio_twd / (taiex * 200), 1)   # 大台建議口數
 
-            # 3. 期貨合約精選
+            # 3. 期貨合約基差精選 (用於參考市場價格)
             contract_reports = get_contract_intelligence(taiex)
             best_c = contract_reports[0]
-            total_cost_twd = best_c['margin'] * opt_qty
 
             # --- VIX + 趨勢 綜合判斷邏輯 ---
             if vix > 30:
                 market_view = "市場極度恐慌 (VIX 飆升)，選擇權保費極貴。"
                 primary_rec = "方案 C (期貨對沖)"
+                # 期貨對沖成本計算 (每口原始保證金)
+                margin_per_qty = 41000 
+                total_cost_twd = margin_per_qty * opt_qty
+                cost_desc = f"{opt_qty} 口 x {margin_per_qty:,} TWD (原始保證金)"
+                cost_label = "🏦 預估所需保證金"
             elif vix > 22 or trend < -0.02:
                 market_view = "市場波動加劇且趨勢向下，下行風險高。"
                 primary_rec = "方案 A (保護性賣權)"
+                # 買入 Put 成本計算 (無須保證金，僅權利金)
+                # 假設極端行情下，價外 Put 約 200 點
+                est_premium_pts = 200 
+                total_cost_twd = est_premium_pts * 50 * opt_qty
+                cost_desc = f"{opt_qty} 口 x {est_premium_pts} 點 x 50 元 (預估權利金)"
+                cost_label = "💸 預估所需權利金"
             else:
                 market_view = "市場處於中性震盪或緩跌。"
                 primary_rec = "方案 B (衣領策略)"
+                # 衣領策略涉及一買一賣，成本複雜化，此處簡化為 Put 權利金
+                total_cost_twd = 100 * 50 * opt_qty 
+                cost_desc = f"{opt_qty} 組 (買 Put 支應保費，接近零成本)"
+                cost_label = "🛡️ 策略預估淨支出"
 
             # --- 構建 CP 值表格 ---
-            cp_table = "合約名稱          | 價格    | 基差    | CP 值 (%) \n"
-            cp_table += "----------------------------------------------\n"
+            cp_table = "期貨合約 (小台)     | 價格    | 基差    | CP 值 (%) \n"
+            cp_table += "--------------------------------------------------\n"
             for cr in contract_reports:
-                cp_table += f"{cr['name']:<15} | {cr['price']:<7} | {cr['basis']:<7} | {cr['cp_ratio']:.4f}%\n"
+                cp_table += f"{cr['name']:<18} | {cr['price']:<7} | {cr['basis']:<7} | {cr['cp_ratio']:.4f}%\n"
 
             # --- 郵件內容構建 ---
             msg = (
@@ -232,10 +253,11 @@ def run_monitor():
                 f"🎯 系統判定首選：{primary_rec}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 
-                f"🔥 【最佳 CP 值合約推薦】\n"
+                f"🔥 【最佳 CP 值 (期貨基差) 參考】\n"
                 f"{cp_table}\n"
-                f"💡 推薦合約：{best_c['name']}\n"
-                f"💵 預估所需資金：{total_cost_twd:,.0f} TWD ({opt_qty} 口 x {best_c['margin']:,} 原始保證金)\n\n"
+                f"💡 目前期貨最划算合約：{best_c['name']}\n"
+                f"{cost_label}：{total_cost_twd:,.0f} TWD\n"
+                f"📄 計算基礎：{cost_desc}\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
                 f"【執行方案評估與建議口數】\n\n"
