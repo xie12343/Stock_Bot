@@ -1,22 +1,53 @@
 import os
 import requests
 import json
+import sys
 from datetime import datetime
 import smtplib
 import yfinance as yf
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# 1. 核心設定 (使用環境變數，適合 GitHub Actions)
+# ==========================================
+# 0. 輔助功能：載入本地 .env 檔案 (無需額外套件)
+# ==========================================
+def load_env(file_path=".env"):
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    try:
+                        key, value = line.split("=", 1)
+                        os.environ[key.strip()] = value.strip()
+                    except ValueError:
+                        continue
+
+# 優先載入本地環境設定
+load_env()
+
+# 1. 核心設定 (支援 環境變數、.env 或 命令行參數)
+# 參數範例: python gas3.py --gas_url YOUR_URL --mock
+args = sys.argv[1:]
 STOCK_BOT_EMAIL = os.environ.get("STOCK_BOT_EMAIL")
 STOCK_BOT_PWD = os.environ.get("STOCK_BOT_PWD")
 GAS_URL = os.environ.get("GAS_URL")
 
+# 命令行參數覆蓋
+if "--gas_url" in args:
+    GAS_URL = args[args.index("--gas_url") + 1]
+
+IS_MOCK = "--mock" in args
+
 # --- 偵錯用：檢查變數是否存在 ---
-if not GAS_URL:
-    print("❌ 錯誤：找不到 GAS_URL 環境變數，請檢查 GitHub Secrets 設定。")
+if not GAS_URL and not IS_MOCK:
+    print("❌ 錯誤：找不到 GAS_URL 環境變數，且未啟用 --mock 模式。")
+    print("💡 提示：請在 .env 檔案中設定 GAS_URL，或使用命令: python gas3.py --mock")
 else:
-    print(f"✅ 已讀取 GAS_URL: {GAS_URL[:15]}...") # 只印出前 15 個字確保安全
+    if GAS_URL:
+        print(f"✅ 已讀取 GAS_URL: {GAS_URL[:15]}...") # 只印出前 15 個字確保安全
+    if IS_MOCK:
+        print("🛠️ 啟用 MOCK 模式：將使用模擬測試數據。")
 
 USD_TWD_RATE = 32.5 
 ALERT_THRESHOLD_USD = 1500000 
@@ -77,29 +108,37 @@ def send_email_alert(msg_content, strategy_name=""):
 # ==========================================
 def run_monitor():
     try:
-        if not GAS_URL:
-            print("❌ 錯誤：GAS_URL 未設定，無法執行。")
-            return
+        if IS_MOCK:
+            print("📡 [MOCK] 正在使用模擬數據...")
+            data = {
+                "status": "success",
+                "portfolio_value": 50000000, # 模擬台幣 5000 萬
+                "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        else:
+            if not GAS_URL:
+                print("❌ 錯誤：GAS_URL 未設定，無法執行。")
+                return
 
-        print(f"📡 正在請求 GAS URL...")
-        response = requests.get(GAS_URL, timeout=15)
-        
-        # 檢查 HTTP 狀態碼
-        if response.status_code != 200:
-            print(f"❌ API 請求失敗，狀態碼：{response.status_code}")
-            return
+            print(f"📡 正在請求 GAS URL...")
+            response = requests.get(GAS_URL, timeout=15)
+            
+            # 檢查 HTTP 狀態碼
+            if response.status_code != 200:
+                print(f"❌ API 請求失敗，狀態碼：{response.status_code}")
+                return
 
-        # 檢查是否抓到空的內容
-        if not response.text.strip():
-            print("❌ 錯誤：GAS 回傳內容為空，請檢查 GAS 程式碼是否已 return JSON 並重新部署為『新版本』")
-            return
+            # 檢查是否抓到空的內容
+            if not response.text.strip():
+                print("❌ 錯誤：GAS 回傳內容為空，請檢查 GAS 程式碼是否已 return JSON 並重新部署為『新版本』")
+                return
 
-        # 嘗試解析 JSON
-        try:
-            data = response.json()
-        except Exception:
-            print(f"❌ 無法解析 JSON。收到的內容為: {response.text}")
-            return
+            # 嘗試解析 JSON
+            try:
+                data = response.json()
+            except Exception:
+                print(f"❌ 無à解析 JSON。收到的內容為: {response.text}")
+                return
 
         # 1. 資產檢查
         portfolio_raw = float(data.get('portfolio_value', 0))
@@ -168,8 +207,14 @@ def run_monitor():
                 f"請登入富邦 Neo SDK 或 e點通確認即時報價後執行。"
             )
             
-            if send_email_alert(msg, strategy_name=primary_rec):
-                print(f"✅ 決策郵件已發送。當前 VIX: {vix}，建議防護口數: {opt_qty}")
+            if STOCK_BOT_EMAIL and STOCK_BOT_PWD:
+                if send_email_alert(msg, strategy_name=primary_rec):
+                    print(f"✅ 決策郵件已發送。當前 VIX: {vix}，建議防護口數: {opt_qty}")
+            else:
+                print("⚠️ [跳過郵件] 由於未設定 STOCK_BOT_EMAIL 或 STOCK_BOT_PWD，郵件發送已跳過。")
+                print("💬 建議決策內容：")
+                print(msg)
+                print(f"✅ 監控完成。當前 VIX: {vix}，建議防護口數: {opt_qty}")
         else:
             print(f"✅ 監控中... 資產 ${total_usd:,.0f} / VIX: {vix}")
 
