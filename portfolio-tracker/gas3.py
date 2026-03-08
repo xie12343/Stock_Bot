@@ -284,6 +284,19 @@ def run_monitor():
             col_p = int((taiex * 0.97) // 100 * 100)      # Collar 支撐 (價外 3%)
             col_c = int((taiex * 1.03) // 100 * 100)      # Collar 壓力 (價外 3%)
             
+            # S&P 500 履約價計算
+            sp_p_put = 0
+            sp_col_p = 0
+            sp_col_c = 0
+            spf_qty = 0
+            mes_qty = 0
+            if spx_price:
+                sp_p_put = int((spx_price * 0.95) // 10 * 10)
+                sp_col_p = int((spx_price * 0.97) // 10 * 10)
+                sp_col_c = int((spx_price * 1.03) // 10 * 10)
+                spf_qty = round(us_exposure_twd / (spx_price * 200), 1)
+                mes_qty = round(us_exposure_usd / (spx_price * 5), 1)
+            
             # 口數計算 (僅針對台股 200 萬部位對沖)
             # 選擇權與小台乘數為 50 元/點；大台為 200 元/點
             contract_value_50 = taiex * 50
@@ -332,11 +345,9 @@ def run_monitor():
             sp500_msg = ""
             if spx_price:
                 # SPF (台指 S&P) 計算: 每口 200 TWD
-                spf_qty = round(us_exposure_twd / (spx_price * 200), 1)
                 spf_cost_desc = f"{spf_qty} 口 x {spx_price:.0f} 點 x 200 元 (預估所需的台幣避險價值)"
                 
                 # MES (微型標普) 計算: 每口 5 USD
-                mes_qty = round(us_exposure_usd / (spx_price * 5), 1)
                 mes_cost_desc = f"{mes_qty} 口 x {spx_price:.0f} 點 x 5 元 (預估所需的美元避險價值)"
                 
                 sp500_msg = (
@@ -377,22 +388,22 @@ def run_monitor():
                 f"【執行方案評估與建議口數】\n\n"
                 
                 f"🔴 方案 A：保護性賣權 (Protective Put)\n"
-                f"   - 操作：買入 {p_put} Put\n"
-                f"   - 口數：{opt_qty} 口\n"
+                f"   - 【台指期】：買入 {p_put} Put ({opt_qty} 口)\n"
+                f"   - 【標普 500】：買入 {sp_p_put} Put (SPF: {spf_qty} 口 / MES: {mes_qty} 口)\n"
                 f"   - 優點：最大虧損僅限於權利金，無保證金追繳風險；資產上漲獲利空間不受限。\n"
-                f"   - 缺點：保費為沉沒成本，若指數未跌破 {p_put}，權利金將隨時間歸零 (Theta 耗損)。\n\n"
+                f"   - 缺點：保費為沉沒成本，Theta 耗損顯著。\n\n"
 
                 f"🟡 方案 B：零成本衣領 (Zero-Cost Collar)\n"
-                f"   - 操作：買入 {col_p} Put + 賣出 {col_c} Call\n"
-                f"   - 口數：各 {opt_qty} 組\n"
-                f"   - 優點：利用賣 Call 的收入補貼買 Put 的支出，達成接近「零成本」的防護。\n"
-                f"   - 缺點：資產若大漲超過 {col_c}，超額利潤將被鎖死；賣 Call 需占用一定保證金。\n\n"
+                f"   - 【台指期】：買入 {col_p} Put + 賣出 {col_c} Call (各 {opt_qty} 組)\n"
+                f"   - 【標普 500】：買入 {sp_col_p} Put + 賣出 {sp_col_c} Call (SPF: {spf_qty} 組 / MES: {mes_qty} 組)\n"
+                f"   - 優點：利用賣 Call 補貼買 Put，接近零成本防護。\n"
+                f"   - 缺點：資產若大漲利潤將被鎖死；賣 Call 需占用一定保證金。\n\n"
 
                 f"🔵 方案 C：期貨完全對沖 (Short Hedge)\n"
-                f"   - 操作：賣出 小台指 (MTX)\n"
-                f"   - 口數：{opt_qty} 口 (或大台 {tx_qty} 口)\n"
-                f"   - 優點：Delta 絕對值為 1，防護效果最直接，沒有時間價值流失的問題。\n"
-                f"   - 缺點：若市場反轉向上，期貨空單將產生實質虧損，且需準備充足的維持保證金以防斷頭。\n\n"
+                f"   - 【台指期】：賣出 小台指 ({opt_qty} 口)\n"
+                f"   - 【標普 500】：賣出 SPF ({spf_qty} 口) 或 MES ({mes_qty} 口)\n"
+                f"   - 優點：Delta 絕對值為 1，防護最直接，無時間價值流失。\n"
+                f"   - 缺點：若市場反轉將產生空單虧損，且需維持充足保證金。\n\n"
                 
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"請登入富邦 Neo SDK 或 e點通確認即時報價後執行。"
