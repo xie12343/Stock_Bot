@@ -83,6 +83,62 @@ def get_market_intelligence():
         return None, None, None
 
 # ==========================================
+# 2.1 功能：抓取 S&P 500 數據
+# ==========================================
+def get_sp500_intelligence():
+    print("🔍 正在分析 S&P 500 指數走勢...")
+    try:
+        spx = yf.Ticker("^GSPC")
+        hist = spx.history(period='5d')
+        current_spx = round(hist['Close'].iloc[-1], 2)
+        trend_5d = (current_spx - hist['Close'].iloc[0]) / hist['Close'].iloc[0]
+        return current_spx, trend_5d
+    except Exception as e:
+        print(f"❌ S&P 500 數據抓取失敗: {e}")
+        return None, None
+
+# ==========================================
+# 2.2 功能：計算美股資產 (從 etf.csv)
+# ==========================================
+def calculate_us_assets(csv_path="portfolio-tracker/etf.csv"):
+    """
+    從 etf.csv 計算幣別為 USD 的市值總和
+    """
+    print(f"📂 正在從 {csv_path} 計算美股資產...")
+    total_usd = 0.0
+    if not os.path.exists(csv_path):
+        # 嘗試備用路徑
+        csv_path = "etf.csv"
+        if not os.path.exists(csv_path):
+            print(f"⚠️ 找不到 etf.csv，使用 0 作為預設值。")
+            return 0.0
+        
+    try:
+        import csv
+        with open(csv_path, mode='r', encoding='utf-8') as f:
+            # 第一行通常是標題，判斷分隔符
+            header_line = f.readline()
+            sep = '\t' if '\t' in header_line else ','
+            f.seek(0)
+            
+            reader = csv.DictReader(f, delimiter=sep)
+            for row in reader:
+                # 去除可能的空白字元
+                currency = row.get("幣別", "").strip()
+                if currency == "USD":
+                    try:
+                        # 市值可能包含逗號
+                        val_str = row.get("市值", "0").replace(",", "").strip()
+                        total_usd += float(val_str)
+                    except (ValueError, TypeError):
+                        continue
+        print(f"💵 計算完成：美股總資產 ${total_usd:,.2f} USD")
+        return total_usd
+    except Exception as e:
+        print(f"❌ 解析 {csv_path} 失敗: {e}")
+        return 0.0
+
+# ==========================================
 # 2.5 功能：小台期貨合約 CP 值分析 (含 W2, F1, F2)
 # ==========================================
 def get_contract_intelligence(taiex):
@@ -118,6 +174,22 @@ def get_contract_intelligence(taiex):
     # 按 CP 值排序 (基差越大越好)
     results.sort(key=lambda x: x['cp_ratio'], reverse=True)
     return results
+
+# ==========================================
+# 2.6 功能：S&P 500 避險合約分析 (SPF vs MES)
+# ==========================================
+def get_sp500_contract_intelligence(spx_price):
+    """
+    分析 S&P 500 避險工具：台指 S&P 500 (SPF) 與 CME 微型標普 (MES)
+    """
+    print("📊 正在分析 S&P 500 避險合約...")
+    # SPF: 200 TWD/pt
+    # MES: 5 USD/pt
+    contracts = [
+        {"name": "台指 S&P 500 (SPF)", "multiplier": 200, "currency": "TWD", "price": spx_price},
+        {"name": "CME 微型標普 (MES)", "multiplier": 5, "currency": "USD", "price": spx_price},
+    ]
+    return contracts
 
 # ==========================================
 # 3. 功能：發送 Email 通知
@@ -195,6 +267,16 @@ def run_monitor():
         # 2. 市場智能分析
         taiex, trend, vix = get_market_intelligence()
         
+        # 預設變數防止下方引用報錯
+        cp_table = ""
+        sp500_msg = ""
+        primary_rec = "穩定觀察中"
+        
+        # 2.1 美股資產與 S&P 500 分析
+        us_exposure_usd = calculate_us_assets()
+        us_exposure_twd = us_exposure_usd * USD_TWD_RATE
+        spx_price, spx_trend = get_sp500_intelligence()
+        
         if total_usd >= ALERT_THRESHOLD_USD and taiex:
             # --- 數據準備與精算 ---
             # 履約價計算 (取整數至百位)
@@ -246,6 +328,31 @@ def run_monitor():
             for cr in contract_reports:
                 cp_table += f"{cr['name']:<18} | {cr['price']:<7} | {cr['basis']:<7} | {cr['cp_ratio']:.4f}%\n"
 
+            # --- 4. S&P 500 避險計算 ---
+            sp500_msg = ""
+            if spx_price:
+                # SPF (台指 S&P) 計算: 每口 200 TWD
+                spf_qty = round(us_exposure_twd / (spx_price * 200), 1)
+                spf_cost_desc = f"{spf_qty} 口 x {spx_price:.0f} 點 x 200 元 (預估所需的台幣避險價值)"
+                
+                # MES (微型標普) 計算: 每口 5 USD
+                mes_qty = round(us_exposure_usd / (spx_price * 5), 1)
+                mes_cost_desc = f"{mes_qty} 口 x {spx_price:.0f} 點 x 5 元 (預估所需的美元避險價值)"
+                
+                sp500_msg = (
+                    f"🇺🇸 【美股資產防護建議 (S&P 500)】\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💰 美股總資產：${us_exposure_usd:,.2f} USD (約 {us_exposure_twd:,.0f} TWD)\n"
+                    f"📈 S&P 500 現價：{spx_price:,.2f} ({'↑' if spx_trend>0 else '↓'} {spx_trend:.2%})\n\n"
+                    f"🔹 推薦合約 1：台指 S&P 500 (SPF)\n"
+                    f"   - 建議口數：{spf_qty} 口\n"
+                    f"   - 計算基礎：{spf_cost_desc}\n\n"
+                    f"🔹 推薦合約 2：CME 微型標普 (MES)\n"
+                    f"   - 建議口數：{mes_qty} 口\n"
+                    f"   - 計算基礎：{mes_cost_desc}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                )
+
             # --- 郵件內容構建 ---
             msg = (
                 f"【資產防護決策報告】\n"
@@ -257,6 +364,8 @@ def run_monitor():
                 f"   - VIX 指數：{vix} ({market_view})\n"
                 f"🎯 系統判定首選：{primary_rec}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                
+                f"{sp500_msg}"
                 
                 f"🔥 【最佳 CP 值 (期貨基差) 參考】\n"
                 f"{cp_table}\n"
