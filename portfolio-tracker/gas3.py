@@ -215,12 +215,12 @@ def get_option_put_price(underlying="^TWII", strike=None):
     嘗試從 Yahoo Finance 或模擬獲取 Put 價格
     """
     if not strike:
-        return 200 # 預設估值
+        return 10 # 預設估值改為較貼近週選擇權深度價外的數值
     
     # 由於 Yahoo Finance 的台指選擇權報價代號不固定且延遲大，
     # 建議參考富邦 Neo SDK 或 e點通之「亮燈權利金」。
-    # 這裡暫時回傳一個基於 VIX 的動態估值 (僅供參考)
-    return 200 
+    # 這裡暫時回傳一個更符合深度價外週選現實的估值 (約 10 點)
+    return 10 
 
 # ==========================================
 # 3. 功能：發送 Email 通知
@@ -429,11 +429,11 @@ def run_monitor():
                 
                 f"🔴 方案 A：保護性賣權 (Protective Put)\n"
                 f"   - 【台指期】：買入 {p_put} Put (數量：{opt_qty} 口)\n"
-                f"      * 若選 {contract_reports[0]['name']}：{opt_qty} 口 x {current_put_price} 點 x 50 元 = {tx_put_cost:,.0f} 元\n"
-                f"      * 若選 {contract_reports[1]['name']}：{opt_qty} 口 x {int(current_put_price*1.5)} 點 x 50 元 = {int(tx_put_cost*1.5):,.0f} 元 (暫估)\n"
-                f"      * 若選 {contract_reports[2]['name']}：{opt_qty} 口 x {int(current_put_price*2.0)} 點 x 50 元 = {int(tx_put_cost*2.0):,.0f} 元 (暫估)\n"
+                f"      * 若選 {contract_reports[0]['name']}：{opt_qty} 口 x {current_put_price} 點 x 50 元 = {tx_put_cost:,.0f} 元 (暫估)\n"
+                f"      * 若選 {contract_reports[1]['name']}：{opt_qty} 口 x {int(current_put_price*21.0)} 點 x 50 元 = {int(tx_put_cost*21.0):,.0f} 元 (暫估)\n"
+                f"      * 若選 {contract_reports[2]['name']}：{opt_qty} 口 x {int(current_put_price*75.0)} 點 x 50 元 = {int(tx_put_cost*75.0):,.0f} 元 (暫估)\n"
                 f"   - 【標普 500】：買入 {sp_p_put if sp_p_put else 'FISP'} 防護 (數量：{fisp_qty} 口)\n"
-                f"   - 💡 說明：權利金點數隨合約月份增加；此方案無保證金風險，最大虧損有限。\n\n"
+                f"   - 💡 說明：實際報價需查 Taifex（如 {p_put} Put 週選約 5~10 點）；此方案無保證金風險，最大虧損有限。\n\n"
 
                 f"🟡 方案 B：零成本衣領 (Zero-Cost Collar)\n"
                 f"   - 【台指期】：買入 {col_p} Put + 賣出 {col_c} Call (數量：{opt_qty} 組)\n"
