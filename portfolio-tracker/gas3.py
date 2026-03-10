@@ -190,8 +190,7 @@ def get_contract_intelligence(taiex):
         c['cp_ratio'] = round(cp_ratio, 4)
         results.append(c)
         
-    # 按 CP 值排序 (基差越大越好)
-    results.sort(key=lambda x: x['cp_ratio'], reverse=True)
+    # 保留原始順序 (03F1, 03, 04)，不強制按 CP 值排序
     return results
 
 # ==========================================
@@ -343,7 +342,8 @@ def run_monitor():
             MARGIN_B_TXO = 54000
 
             contract_reports = get_contract_intelligence(taiex)
-            best_c = contract_reports[0]
+            # 尋找 CP 值最高 (最划算) 的期貨合約
+            best_c = max(contract_reports, key=lambda x: x['cp_ratio'])
 
             # --- VIX + 趨勢 綜合判定首選 ---
             if vix > 30:
