@@ -1,0 +1,35 @@
+name: US ETF Protective Put Alert
+
+on:
+  schedule:
+    # 每天台灣時間 05:00 (UTC 21:00) 執行一次 (美股收盤後)
+    - cron: '0 21 * * 1-5'
+  workflow_dispatch: # 允許手動觸發
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmagic1
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run US ETF Protective Put Alert
+        env:
+          STOCK_BOT_EMAIL: ${{ secrets.STOCK_BOT_EMAIL }}
+          STOCK_BOT_PWD: ${{ secrets.STOCK_BOT_PWD }}
+        run: python us_protective_put_alert.py
