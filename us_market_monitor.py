@@ -6,20 +6,22 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # ==========================================
-# 1. 核心設定與警報閾值
+# 1. 核心設定與警報閾值 (參考 NotebookLM V3.x 策略)
 # ==========================================
 STOCK_BOT_EMAIL = os.environ.get("STOCK_BOT_EMAIL")
 STOCK_BOT_PWD = os.environ.get("STOCK_BOT_PWD")
+GAS_URL = os.environ.get("GAS_URL")
 
-# 設定「大跌」的觸發條件 (可自行調整)
-DROP_THRESHOLD_PCT = -0.015  # 指數下跌超過 1.5% 即觸發警報
+# 設定「大跌」的觸發條件
+# 參考 V3.1 終極版 95% VaR (風險價值) 約為 -2.1%
+DROP_THRESHOLD_PCT = -0.021  
 VIX_DANGER_LEVEL = 25.0      # VIX 恐慌指數大於 25 視為高風險
 
 # ==========================================
 # 2. 獲取美股即時數據
 # ==========================================
 def get_us_market_status():
-    print("🔍 正在掃描美股即時報價與波動率...")
+    print("🔍 正在掃描美股即時報價與波動率 (Strategy: V3.x)...")
     try:
         # ^GSPC: 標普500, ^IXIC: 納斯達克, ^VIX: 恐慌指數
         tickers = yf.Tickers("^GSPC ^IXIC ^VIX")
@@ -67,7 +69,7 @@ def send_email_alert(msg_content, is_critical=False):
         
         # 根據嚴重程度改變信件標題
         title_icon = "🚨 [緊急防護]" if is_critical else "⚠️ [市場警告]"
-        msg['Subject'] = f"{title_icon} 美股大跌警報 - 建議啟動 Put 避險 ({datetime.now().strftime('%H:%M')})"
+        msg['Subject'] = f"{title_icon} 美股波動警報 - 觸發 V3.1 安全閾值 ({datetime.now().strftime('%H:%M')})"
         
         msg.attach(MIMEText(msg_content, 'plain'))
         server = smtplib.SMTP("smtp.gmail.com", 587)
@@ -75,12 +77,12 @@ def send_email_alert(msg_content, is_critical=False):
         server.login(sender, password)
         server.send_message(msg)
         server.quit()
-        print("✅ 避險警報 Email 已成功發送！")
+        print("✅ 策略警報 Email 已成功發送！")
     except Exception as e:
         print(f"❌ 郵件發送失敗: {e}")
 
 # ==========================================
-# 4. 主邏輯：判斷是否需要買 Put
+# 4. 主邏輯：判斷是否觸發策略建議
 # ==========================================
 def run_monitor():
     market_data = get_us_market_status()
@@ -91,7 +93,7 @@ def run_monitor():
     ndx_drop = market_data["NASDAQ"]["change"]
     vix = market_data["VIX"]
     
-    # 判斷是否觸發警報 (任一指數跌破閾值，或 VIX 異常飆高)
+    # 判斷是否觸發警報 (跌破 V3.1 的 VaR 閾值 -2.1%)
     is_sp500_crash = sp500_drop <= DROP_THRESHOLD_PCT
     is_ndx_crash = ndx_drop <= DROP_THRESHOLD_PCT
     is_vix_high = vix >= VIX_DANGER_LEVEL
@@ -99,27 +101,32 @@ def run_monitor():
     print(f"📊 當前狀態: S&P500 {sp500_drop:.2%}, NASDAQ {ndx_drop:.2%}, VIX {vix:.2f}")
 
     if is_sp500_crash or is_ndx_crash or is_vix_high:
-        is_critical = (sp500_drop <= -0.02) or (vix >= 30) # 跌超 2% 或 VIX 破 30 視為極度危險
+        # VIX >= 30 視為極度危險 (對應 V3.4 高波動環境)
+        is_critical = (sp500_drop <= -0.03) or (vix >= 30) 
         
         report = (
-            f"【美股崩盤監控報告】\n"
+            f"【2026 全球 ETF 投資系統 - 異常監控報告】\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"目前美股出現顯著下跌，台指夜盤可能已遭受波及，請立即評估是否啟動避險：\n\n"
+            f"當前市場波動已觸發 V3.1 終極版之安全性閾值 (-2.1%)，\n"
+            f"請評估您的資產配置平衡度：\n\n"
+            f"📊 市場數據：\n"
             f"📉 S&P 500: {market_data['SP500']['price']:,.2f} ({sp500_drop:.2%})\n"
             f"📉 NASDAQ:  {market_data['NASDAQ']['price']:,.2f} ({ndx_drop:.2%})\n"
             f"🔥 VIX 指數: {vix:.2f} \n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🎯 【系統行動建議：保護性賣權 (Buy Put)】\n"
-            f"1. 請開啟富邦 APP，切換至「盤後 (夜盤)」行情。\n"
-            f"2. 目標商品：建議尋找『次月合約 (04)』，履約價低於目前大盤約 300~500 點的 Put。\n"
-            f"3. 操作方向：買進 (Buy)。\n"
-            f"4. 資金控管：買方無保證金追繳風險，最大虧損為期初支付之權利金。\n"
+            f"🎯 【策略建議一：5% 帶狀再平衡 (Rebalancing)】\n"
+            f"根據筆記，若單一資產偏離目標比例超過 5%，應執行再平衡。\n"
+            f"請檢查您是否需要從超漲資產 (如 V3.4 之 IUMO/SMH) 轉入防禦性資產 (如 V3.1 之 IUHC/IUFS)。\n\n"
+            f"🎯 【策略建議二：避險保護 (Hedging)】\n"
+            f"1. 商品建議：買進 (Buy) 次月合約 (04) Put。\n"
+            f"2. 深度建議：視 VIX 水平調整，高 VIX 時可考慮 Zero-Cost Collar 降低避險成本。\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💡 提醒：若打算今晚入睡前下單，建議使用『雲端條件單 (OCO)』設定停損與停利出局點。"
+            f"💡 備註：V3.5 全球版在此環境下通常具備最強抗壓性 (-19.8% MDD)，請檢查全球資產比例。\n"
+            f"🔗 資產試算：{GAS_URL if GAS_URL else '未設定 GAS_URL'}"
         )
         send_email_alert(report, is_critical)
     else:
-        print("✅ 目前美股波動在安全範圍內，無需發送警報。")
+        print("✅ 目前市場波動位於 V3.1 安全防線內，無需發送報警。")
 
 if __name__ == "__main__":
     run_monitor()
